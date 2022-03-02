@@ -24,13 +24,10 @@ type (
 	errorHandler func(error)
 )
 
-const (
-	nullChar    = "\x00"
-	newLineByte = byte('\n')
-)
+const newLineByte = byte('\n')
 
 func main() {
-	chunkToBeProcessedSize := 2
+	sizeOfTheChunkToBeFetched := 2
 	dataSource, _ := os.Open("data_input_example.txt")
 
 	chunkHandler := func(b []byte) error {
@@ -39,7 +36,7 @@ func main() {
 		return nil
 	}
 
-	err := processDataSourceInChunks(dataSource, chunkToBeProcessedSize, chunkHandler, delimiteByNewLine)
+	err := processDataSourceInChunks(dataSource, sizeOfTheChunkToBeFetched, chunkHandler, delimiteByNewLine)
 
 	if err != nil {
 		log.Fatalf("Exit due to [%v]", err)
@@ -51,7 +48,8 @@ func main() {
 // time allowing large files to be processed in small parts avoiding large ammounts of memory to be allocation. This
 // method is primarily focused on dealing with files containing JSON data splited in lines.
 func processDataSourceInChunks(
-	dataSource io.Reader, chunkSize int,
+	dataSource io.Reader,
+	chunkSize int,
 	chunkHandler dataChunkHandler,
 	chunkDelimiter dataChunkDelimiter) error {
 	leftOver := make([]byte, 0)
@@ -62,6 +60,9 @@ func processDataSourceInChunks(
 		enoughDataInChunkToBeProcessed := false
 		chunkToBeProcessed := make([]byte, 0, chunkSize+1)
 
+		// This loop is used to retrieve small parts of the data from the io.Reader then check if all the data fetched
+		// so far is enough to be considered a "chunk" by applying the dataChunkDelimiter function of the data so far
+		// collected every time a new part is retrieved.
 		for {
 			tempChunk := make([]byte, chunkSize, chunkSize+1)
 
@@ -138,6 +139,8 @@ func delimiteByNewLine(chunk []byte) (bool, []byte, []byte) {
 	chunkCopy := make([]byte, len(chunk), len(chunk)+1)
 	copy(chunkCopy, chunk)
 
+	// by splitting the chunk using a reparator as new line, we could define the chunk and the left over by choosing
+	// the first index as the chunk and all the other elements as left overs.
 	parts := bytes.Split(chunkCopy, []byte{newLineByte})
 
 	thereIsLeftOver := len(parts) > 1
@@ -148,6 +151,8 @@ func delimiteByNewLine(chunk []byte) (bool, []byte, []byte) {
 		chunkToBeProcessed := parts[0]
 		leftOverParts := parts[1:]
 
+		// all leftover must be concatenated and a new line should be add at the end each part in order to return it
+		// as it was given to the method as parameter so it could be iterated again in future usages.
 		for i, part := range leftOverParts {
 			partLen := len(part)
 
@@ -157,6 +162,8 @@ func delimiteByNewLine(chunk []byte) (bool, []byte, []byte) {
 
 			leftOver = append(leftOver, part...)
 
+			// no new line should be add at the last index to prevent adding new lines at parts of text that does not
+			// contain them.
 			if i < partLen-1 {
 				leftOver = append(leftOver, newLineByte)
 			}
