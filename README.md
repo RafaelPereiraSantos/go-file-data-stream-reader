@@ -1,5 +1,5 @@
 # go-file-data-stream-reader
-A project to test the processing of large files in parts instead of a whole
+A project to test the processing of files and zip files in chunks in order to prevent unecessary memory usage by loading the whole file into it.
 
 # How to run
 
