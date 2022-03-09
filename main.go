@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"os"
+
+	"github.com/krolaw/zipstream"
 )
 
 type (
@@ -20,19 +22,28 @@ type (
 	// NOTE: the boolean returned is in case that the byte array that was send is enough to be processed and there is no
 	// left overs to return.
 	dataChunkDelimiter func([]byte) (bool, []byte, []byte)
-
-	errorHandler func(error)
 )
 
-const newLineByte = byte('\n')
+const (
+	newLineByte               = byte('\n')
+	sizeOfTheChunkToBeFetched = 128
+)
 
 func main() {
-	sizeOfTheChunkToBeFetched := 2
+	readAndProcessTextFileExample()
+
+	readAndProcessTextFileInsideZipExample()
+}
+
+// readAndProcessTextFileExample, this example is reading a text file present at the root of the project, that does
+// contain a couple of JSON lines that should be unmarshelled and some sort of processing be applied.
+func readAndProcessTextFileExample() {
+	log.Default().Printf("Starting to process a simple text file")
+
 	dataSource, _ := os.Open("data_input_example.txt")
 
 	chunkHandler := func(b []byte) error {
-		msg := fmt.Sprintf("Text: [%s], size: [%d]", string(b), len(b))
-		fmt.Println(msg)
+		log.Default().Printf(fmt.Sprintf("Text: %s, size: [%d] characters", string(b), len(b)))
 		return nil
 	}
 
@@ -41,7 +52,33 @@ func main() {
 	if err != nil {
 		log.Fatalf("Exit due to [%v]", err)
 	}
+}
 
+// readAndProcessTextFileInsideZipExample, this example is reading a zip file present at the roof of the project that
+// contains a single text file with a couple of JSON lines in it, the zip reader is provided by:
+// github.com/krolaw/zipstream
+func readAndProcessTextFileInsideZipExample() {
+	log.Default().Printf("Starting to process a compressed zip file")
+
+	dataSource, _ := os.Open("data_input_example.zip")
+
+	zipStreamData := zipstream.NewReader(dataSource)
+	_, err := zipStreamData.Next()
+
+	if err != nil {
+		log.Fatalf("Exit due to [%v]", err)
+	}
+
+	chunkHandler := func(b []byte) error {
+		log.Default().Printf(fmt.Sprintf("Text: %s, size: [%d] characters", string(b), len(b)))
+		return nil
+	}
+
+	err = processDataSourceInChunks(zipStreamData, sizeOfTheChunkToBeFetched, chunkHandler, delimiteByNewLine)
+
+	if err != nil {
+		log.Fatalf("Exit due to [%v]", err)
+	}
 }
 
 // processDataSourceInChunks, it is a function that will split a byte array in chunks of data to process each part at a
@@ -68,10 +105,14 @@ func processDataSourceInChunks(
 
 			checkLeftOverFirst := len(leftOver) > 0
 
+			// whenever a new iteration begins, the left overs from the previous one has priority to be processed if
+			// they do exist.
 			if checkLeftOverFirst {
 				tempChunk = leftOver
 				leftOver = make([]byte, 0)
 			} else {
+				// if there is no left over bytes from the previous iteration or it is the first one then the data
+				// source is read.
 				_, err = dataSource.Read(tempChunk)
 			}
 
@@ -88,8 +129,12 @@ func processDataSourceInChunks(
 
 			chunkToBeProcessed = append(chunkToBeProcessed, tempChunk...)
 
+			// fmt.Println(string(chunkToBeProcessed))
+
 			enoughDataInChunkToBeProcessed, chunkToBeProcessed, leftOver = chunkDelimiter(chunkToBeProcessed)
 
+			// whenever either all the necessary data is retrieved in order to allow a processing of that chunk or
+			// the reader hit an EOF its time to try to process the chunk.
 			if enoughDataInChunkToBeProcessed {
 				break
 			}
@@ -112,23 +157,7 @@ func processDataSourceInChunks(
 }
 
 func removeNewLine(b []byte) []byte {
-	bParts := bytes.Split(b, []byte("\n"))
-
-	if len(bParts) == 1 {
-		return b
-	}
-
-	if len(bParts) == 0 {
-		return []byte{}
-	}
-
-	bWithNoNewLine := make([]byte, 0)
-
-	for _, part := range bParts {
-		bWithNoNewLine = append(bWithNoNewLine, part...)
-	}
-
-	return bWithNoNewLine
+	return bytes.Replace(b, []byte{newLineByte}, []byte(""), -1)
 }
 
 // delimiteByNewLine, one implementaiton of dataChunkDelimiter, this function will receive a byte array as parameter and
@@ -146,9 +175,13 @@ func delimiteByNewLine(chunk []byte) (bool, []byte, []byte) {
 	thereIsLeftOver := len(parts) > 1
 
 	if thereIsLeftOver {
-		leftOver := make([]byte, len(parts[1]))
+		leftOver := make([]byte, 0)
 
+		// the first part until the first new line is the desired chunk.
 		chunkToBeProcessed := parts[0]
+
+		//anything behond the first new line should be processed again and more bytes add until a proper chunk is
+		// defined.
 		leftOverParts := parts[1:]
 
 		// all leftover must be concatenated and a new line should be add at the end each part in order to return it
@@ -164,7 +197,7 @@ func delimiteByNewLine(chunk []byte) (bool, []byte, []byte) {
 
 			// no new line should be add at the last index to prevent adding new lines at parts of text that does not
 			// contain them.
-			if i < partLen-1 {
+			if i < len(leftOverParts)-1 {
 				leftOver = append(leftOver, newLineByte)
 			}
 		}
